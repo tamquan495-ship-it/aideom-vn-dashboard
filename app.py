@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-# FIXED_VERSION_BAI4_BAI9_2026_05_26
 """
 AIDEOM-VN Decision Models Dashboard
 Web Streamlit cho toàn bộ 12 bài thực hành Mô hình ra quyết định
@@ -731,17 +730,15 @@ def solve_region_lp(with_fairness: bool = True) -> Tuple[pd.DataFrame, float, bo
     # Sàn nhân lực >= 12000
     row = np.zeros(n); row[3::4] = -1
     A_ub.append(row); b_ub.append(-12000)
-    # Fairness đơn giản: D_after của mọi vùng >= 65% vùng mạnh nhất ban đầu SE 82
-    # Dùng 0.65 để mô hình vẫn khả thi dưới trần ngân sách 12.000 tỷ mỗi vùng.
+    # Fairness đơn giản: D_after của mọi vùng >= 70% vùng mạnh nhất ban đầu SE 82
     if with_fairness:
         D0 = np.array([38, 78, 55, 32, 82, 48], dtype=float)
         gamma = 0.002
         M_ref = 82
-        fairness_lambda = 0.65
         for r in range(6):
-            # D0 + gamma*x_D >= fairness_lambda*M_ref
+            # D0 + gamma*x_D >= 0.7*M_ref
             row = np.zeros(n); row[r * 4 + 1] = -gamma
-            A_ub.append(row); b_ub.append(-(fairness_lambda * M_ref - D0[r]))
+            A_ub.append(row); b_ub.append(-(0.7 * M_ref - D0[r]))
     res = linprog(c, A_ub=np.array(A_ub), b_ub=np.array(b_ub), bounds=[(0, None)] * n, method="highs")
     if not res.success:
         return pd.DataFrame(), np.nan, False
@@ -1033,65 +1030,15 @@ def page_bai9() -> None:
     # Variables: xAI[0..7], xH[0..7]
     coeff_net = np.concatenate([a1 - c1 * risk, b1])
     c = -coeff_net
-    A_ub = []
-    b_ub = []
-
-    # Tổng ngân sách không vượt quá 30.000 tỷ
-    A_ub.append(np.ones(2 * N))
-    b_ub.append(30000)
-
-    # Bắt buộc có ít nhất 6.000 tỷ đầu tư AI để biểu đồ phản ánh cả tự động hóa và tạo việc làm mới
-    row = np.zeros(2 * N)
-    row[:N] = -1
-    A_ub.append(row)
-    b_ub.append(-6000)
-
-    # Bắt buộc có ít nhất 12.000 tỷ đào tạo lại lao động
-    row = np.zeros(2 * N)
-    row[N:] = -1
-    A_ub.append(row)
-    b_ub.append(-12000)
-
-    # Mỗi ngành nhận tối thiểu 1.000 tỷ để tránh dồn toàn bộ vốn vào một ngành duy nhất
+    A_ub = [np.ones(2 * N)]; b_ub = [30000]
+    # NetJob >= 0 => -(coef_AI*xAI + b1*xH) <= 0
     for i in range(N):
-        row = np.zeros(2 * N)
-        row[i] = -1
-        row[N + i] = -1
-        A_ub.append(row)
-        b_ub.append(-1000)
-
-    # Các ngành dễ bị tổn thương cần tối thiểu 1.500 tỷ đào tạo lại:
-    # 0: Nông-Lâm-Thủy sản, 2: Xây dựng, 3: Bán buôn-bán lẻ
-    for i in [0, 2, 3]:
-        row = np.zeros(2 * N)
-        row[N + i] = -1
-        A_ub.append(row)
-        b_ub.append(-1500)
-
-    # NetJob từng ngành không âm và dịch chuyển việc làm không vượt năng lực đào tạo lại
-    for i in range(N):
-        row = np.zeros(2 * N)
-        row[i] = -(a1[i] - c1[i] * risk[i])
-        row[N + i] = -b1[i]
-        A_ub.append(row)
-        b_ub.append(0)
-
-        row2 = np.zeros(2 * N)
-        row2[i] = c1[i] * risk[i]
-        row2[N + i] = -d1[i]
-        A_ub.append(row2)
-        b_ub.append(0)
-
-    # Giới hạn tối đa mỗi ngành để phân bổ thực tế hơn và biểu đồ không bị lệch về một cột
-    bounds = [(0, 5000)] * N + [(0, 6000)] * N
-
-    res = linprog(
-        c,
-        A_ub=np.array(A_ub),
-        b_ub=np.array(b_ub),
-        bounds=bounds,
-        method="highs"
-    )
+        row = np.zeros(2 * N); row[i] = -(a1[i] - c1[i] * risk[i]); row[N + i] = -b1[i]
+        A_ub.append(row); b_ub.append(0)
+        # Displaced <= RetrainCap => c1*risk*xAI - d1*xH <=0
+        row2 = np.zeros(2 * N); row2[i] = c1[i] * risk[i]; row2[N + i] = -d1[i]
+        A_ub.append(row2); b_ub.append(0)
+    res = linprog(c, A_ub=np.array(A_ub), b_ub=np.array(b_ub), bounds=[(0, None)] * (2 * N), method="highs")
     if not res.success:
         st.error("Bài toán không khả thi.")
         return
@@ -1355,17 +1302,8 @@ def page_bai12() -> None:
 def main() -> None:
     inject_css()
     choice = sidebar()
-
-    # Lưu ý: phải kiểm tra Bài 10, 11, 12 trước Bài 1,
-    # vì chuỗi "Bài 10" cũng chứa "Bài 1".
     if choice.startswith("🏠"):
         page_home()
-    elif "Bài 10" in choice:
-        page_bai10()
-    elif "Bài 11" in choice:
-        page_bai11()
-    elif "Bài 12" in choice:
-        page_bai12()
     elif "Bài 1" in choice:
         page_bai1()
     elif "Bài 2" in choice:
@@ -1384,6 +1322,12 @@ def main() -> None:
         page_bai8()
     elif "Bài 9" in choice:
         page_bai9()
+    elif "Bài 10" in choice:
+        page_bai10()
+    elif "Bài 11" in choice:
+        page_bai11()
+    elif "Bài 12" in choice:
+        page_bai12()
 
 
 if __name__ == "__main__":
