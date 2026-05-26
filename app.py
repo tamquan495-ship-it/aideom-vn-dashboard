@@ -1302,8 +1302,15 @@ def page_bai12() -> None:
 def main() -> None:
     inject_css()
     choice = sidebar()
+
     if choice.startswith("🏠"):
         page_home()
+    elif "Bài 10" in choice:
+        page_bai10()
+    elif "Bài 11" in choice:
+        page_bai11()
+    elif "Bài 12" in choice:
+        page_bai12()
     elif "Bài 1" in choice:
         page_bai1()
     elif "Bài 2" in choice:
@@ -1322,12 +1329,6 @@ def main() -> None:
         page_bai8()
     elif "Bài 9" in choice:
         page_bai9()
-    elif "Bài 10" in choice:
-        page_bai10()
-    elif "Bài 11" in choice:
-        page_bai11()
-    elif "Bài 12" in choice:
-        page_bai12()
 
 
 if __name__ == "__main__":
