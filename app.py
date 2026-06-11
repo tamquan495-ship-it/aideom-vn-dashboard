@@ -251,18 +251,11 @@ def inject_css() -> None:
 
 
 def title_block(title: str, level: str, badges: List[str], subtitle: str) -> None:
-    badges_html = "".join(
-        f'<span class="badge {"badge-hot" if i == 0 else ""}">{b}</span>'
-        for i, b in enumerate(badges)
-    )
+    """Chỉ hiển thị tiêu đề, ẩn toàn bộ nhãn/tùy chọn và mô tả dưới tiêu đề."""
     st.markdown(
         f"""
         <div class="hero">
             <h1>{title}</h1>
-            <div class="badge-row">
-                <span class="badge badge-hot">{level}</span>{badges_html}
-            </div>
-            <div class="subtitle">{subtitle}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -730,15 +723,15 @@ def solve_region_lp(with_fairness: bool = True) -> Tuple[pd.DataFrame, float, bo
     # Sàn nhân lực >= 12000
     row = np.zeros(n); row[3::4] = -1
     A_ub.append(row); b_ub.append(-12000)
-    # Fairness đơn giản: D_after của mọi vùng >= 70% vùng mạnh nhất ban đầu SE 82
+    # Fairness đơn giản: D_after của mọi vùng >= 65% vùng mạnh nhất ban đầu SE 82
     if with_fairness:
         D0 = np.array([38, 78, 55, 32, 82, 48], dtype=float)
         gamma = 0.002
         M_ref = 82
         for r in range(6):
-            # D0 + gamma*x_D >= 0.7*M_ref
+            # D0 + gamma*x_D >= 0.65*M_ref
             row = np.zeros(n); row[r * 4 + 1] = -gamma
-            A_ub.append(row); b_ub.append(-(0.7 * M_ref - D0[r]))
+            A_ub.append(row); b_ub.append(-(0.65 * M_ref - D0[r]))
     res = linprog(c, A_ub=np.array(A_ub), b_ub=np.array(b_ub), bounds=[(0, None)] * n, method="highs")
     if not res.success:
         return pd.DataFrame(), np.nan, False
@@ -1030,15 +1023,64 @@ def page_bai9() -> None:
     # Variables: xAI[0..7], xH[0..7]
     coeff_net = np.concatenate([a1 - c1 * risk, b1])
     c = -coeff_net
-    A_ub = [np.ones(2 * N)]; b_ub = [30000]
-    # NetJob >= 0 => -(coef_AI*xAI + b1*xH) <= 0
+    A_ub = []
+    b_ub = []
+
+    # Tổng ngân sách không vượt quá 30.000 tỷ
+    A_ub.append(np.ones(2 * N))
+    b_ub.append(30000)
+
+    # Bắt buộc có tối thiểu đầu tư AI để mô hình không dồn toàn bộ vào đào tạo
+    row = np.zeros(2 * N)
+    row[:N] = -1
+    A_ub.append(row)
+    b_ub.append(-6000)
+
+    # Bắt buộc có tối thiểu đào tạo lại
+    row = np.zeros(2 * N)
+    row[N:] = -1
+    A_ub.append(row)
+    b_ub.append(-12000)
+
+    # Mỗi ngành nhận tối thiểu 1.000 tỷ để kết quả phân bổ thực tế hơn
     for i in range(N):
-        row = np.zeros(2 * N); row[i] = -(a1[i] - c1[i] * risk[i]); row[N + i] = -b1[i]
-        A_ub.append(row); b_ub.append(0)
-        # Displaced <= RetrainCap => c1*risk*xAI - d1*xH <=0
-        row2 = np.zeros(2 * N); row2[i] = c1[i] * risk[i]; row2[N + i] = -d1[i]
-        A_ub.append(row2); b_ub.append(0)
-    res = linprog(c, A_ub=np.array(A_ub), b_ub=np.array(b_ub), bounds=[(0, None)] * (2 * N), method="highs")
+        row = np.zeros(2 * N)
+        row[i] = -1
+        row[N + i] = -1
+        A_ub.append(row)
+        b_ub.append(-1000)
+
+    # Ngành dễ tổn thương cần tối thiểu 1.500 tỷ đào tạo lại
+    for i in [0, 2, 3]:
+        row = np.zeros(2 * N)
+        row[N + i] = -1
+        A_ub.append(row)
+        b_ub.append(-1500)
+
+    # NetJob từng ngành không âm và dịch chuyển việc làm không vượt năng lực đào tạo lại
+    for i in range(N):
+        row = np.zeros(2 * N)
+        row[i] = -(a1[i] - c1[i] * risk[i])
+        row[N + i] = -b1[i]
+        A_ub.append(row)
+        b_ub.append(0)
+
+        row2 = np.zeros(2 * N)
+        row2[i] = c1[i] * risk[i]
+        row2[N + i] = -d1[i]
+        A_ub.append(row2)
+        b_ub.append(0)
+
+    # Giới hạn tối đa mỗi ngành để không dồn vốn vào một ngành
+    bounds = [(0, 5000)] * N + [(0, 6000)] * N
+
+    res = linprog(
+        c,
+        A_ub=np.array(A_ub),
+        b_ub=np.array(b_ub),
+        bounds=bounds,
+        method="highs",
+    )
     if not res.success:
         st.error("Bài toán không khả thi.")
         return
